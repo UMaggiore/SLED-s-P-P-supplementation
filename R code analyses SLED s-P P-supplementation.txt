@@ -1,0 +1,169 @@
+#####   R code analyses SLED s-P phosphate supplementation Regolisti et al
+#####      February 5th, 2022         
+#####      U. Maggiore                  
+
+### mixed model dor the analysis of post-SLED hypophoshatemia
+rm( list=ls() )
+library(tidyverse)
+sled_3_sessions = sled_3_sessions %>% 
+	mutate(SLED_ID = as.factor(SLED_ID),
+               Sex = as.factor(Sex),
+               Machine = as.factor(Machine)
+               )
+
+library(nlme)
+m.mixed.1 <- gls(model = P  ~ SLED_ID + 
+	Sex + I(Age / 10) + P_base + ActualSLEDduration + Uflh + I(Qb / 100) + I(Qdmlmin /100)  + Machine,
+	data = sled_3_sessions,
+	correlation = corSymm(form =  ~ as.numeric(SLED_ID)|ID),
+	weights = varIdent(form =  ~ 1|SLED_ID),
+	na.action = na.omit)
+summary(m.mixed.1)
+
+# calculate e round estimates and 95% confidence intervals
+res.df <-  m.mixed.1$dims$N - m.mixed.1$dims$p
+summary(m.mixed.1)$"tTable"
+betas <- summary(m.mixed.1)$"tTable"[,1]
+std.err <- summary(m.mixed.1)$"tTable"[,2]
+round(betas - abs(qt(0.025, df = res.df)) * std.err, 2)
+round(betas + abs(qt(0.025, df = res.df)) * std.err, 2)
+
+
+# calculate marginal means
+num.sled_3_sessions = num.sled_3_sessions %>% 
+	       mutate(SLED_ID = as.factor(SLED_ID),
+                      Sex = as.numeric(Sex) ,
+                      Machine = as.numeric(Machine) -1
+               )
+m.mixed.num <- gls(model = P  ~ SLED_ID + 
+	Sex + I(Age / 10) + P_base + ActualSLEDduration + I(Uflh / 100) + I(Qb / 100) + Qdmlmin  + Machine,
+	data = num.sled_3_sessions,
+	correlation = corSymm(form =  ~ as.numeric(SLED_ID)|ID),
+	weights = varIdent(form =  ~ 1|SLED_ID),
+	na.action = na.omit)
+
+library(predictmeans)
+predictout <- predictmeans(m.mixed.num, "SLED_ID", barplot = FALSE)
+predictout$"mean_table"
+est <- predictout$"mean_table"["Predicted means"]
+lb <- predictout$"mean_table"["LL of 95% CI"]
+ub <- predictout$"mean_table"["UL of 95% CI"]
+library(dplyr)
+round(bind_cols(est,lb,ub), 2)
+m.tab <- as.data.frame(predictout$"mean_table")
+m.tab$"SLED_ID" <- as.factor(m.tab$"SLED_ID")
+m.tab <- rename(m.tab, est =  "Predicted means", 
+			lb = "LL of 95% CI", 
+			ub = "UL of 95% CI")
+
+# drow the plot of marginal means
+library(ggplot2)
+p <- ggplot(m.tab, aes(x = SLED_ID, y = est )) + 
+	geom_col(fill = "#FFDDDD", colour = "black", position = "dodge", width = 0.5, size = 0.20) +
+  	geom_errorbar(aes(ymin = lb, ymax = ub), width = 0.1, size = 0.20) 
+        labs(title = NULL, x = "SLED Session", y = "Serum Phosphate (mg/dL)") +
+   	theme_bw() +
+   	theme(panel.grid.major.x = element_blank())  +
+        geom_text(
+    	aes(y = 0.4, label = format(round(est, 2), nsmall = 2)),
+    	colour = "black", size = 3,
+    	vjust = 1.5)
+ggsave("barplot_mixed_3sled.pdf", width = 5.56, height = 4.54)
+
+
+
+# change cotrasts SLETD t 3vs 1, express Age per 10 yrs increas and Qg, Qdmlmin per 100ml/min increase
+contrasts(sled_3_sessions$SLED_ID) <- contr.treatment(levels(sled_3_sessions$SLED_ID), base = 2)
+
+
+### calculation trend in matched proportion of post-SLED hypophoshatemia
+rm( list=ls() )
+library(survival)
+test.trend <- clogit( ipoP ~ SLED_ID + strata(ID), data = sled_3_sessions)
+summary(test.trend)
+chi2 <- -2*(test.trend$"loglik"[1]-test.trend$"loglik"[2])
+pval <- pchisq(chi2, df=1, lower.tail=FALSE)
+format(round(pval, 3), nsmall = 3)
+
+# draw the barplot of proportions
+library(tidyverse)
+prop.hypoP <- 
+	sled_3_sessions  %>%
+	group_by(SLED_ID) %>%
+    	summarize(Mean = mean(ipoP, na.rm=TRUE) * 100)
+prop.hypoP$SLED_ID <- as.factor(prop.hypoP$SLED_ID)
+
+p <- ggplot(prop.hypoP, aes(x = SLED_ID, y = Mean )) + 
+	geom_col(fill = "#FFDDDD", colour = "black", position = "dodge", width = 0.5, size = 0.20) 
+        labs(title = NULL, x = "SLED Session", y = "Post-SLED Hypophosphatemia (%)") +
+   	theme_bw() +
+   	theme(panel.grid.major.x = element_blank()) + geom_text(
+    	aes(y = 3.0, label = paste(format(round(Mean, 1), nsmall = 1), "%")),
+    	colour = "black", size = 3,
+    	vjust = 1.5) + 
+	annotate("text", x = 1.2, y = 29, label = paste("Test for trend: P = ", format(round(pval, 3), nsmall = 3)) , size = 4) 
+ggsave("barplot_trend.pdf", width = 5.56, height = 4.54)
+
+
+### calculation mechanical ventilation rates via negative binomial regression
+rm( list=ls() )
+library(MASS)
+nb.crude <- glm.nb(total_VMdays  ~ any_hypoP + offset(log_icu_los), data = vmdays)
+summary(nb.crude)
+library(biostat3)
+format(round(lincom(nb.crude, c("(Intercept)"), eform = TRUE)[, c(1:3)], 2), nsmall = 2)
+format(round(lincom(nb.crude, c("(Intercept) + any_hypoP1"), eform = TRUE)[, c(1:3)], 2), nsmall = 2)
+
+
+### calculate crude mortality rates by time-varying hypophosphatemia
+
+library(epiR)
+library(tidyverse)
+strata.hypoP <- 
+	p_time_varying.dta  %>%
+	group_by(hypoP) %>%
+    	summarize(ncas = sum(status, na.rm=TRUE),
+		          ntar = sum((tstop - tstart), na.rm=TRUE)
+		)
+strata.hypoP <- arrange(strata.hypoP, desc(hypoP))
+strata.hypoP <- as.matrix(strata.hypoP)
+round(epi.conf(strata.hypoP[, c(2:3)], ctype = "inc.rate",  method = "exact",  conf.level = 0.95) * 100, 2)
+comp.hypoP <- epi.2by2(dat = strata.hypoP[, c(2:3)], method = "cohort.time", digits = 2,
+	conf.level = 0.95, units = 100, interpret = FALSE, outcome = "as.rows")
+comp.hypoP$massoc.summary
+round(comp.hypoP$massoc.summary[1,c(2:4)], 2)
+
+
+### calculate Cox PH regression model with time-varying s-P and phosphate supplementation (=1 onward upon first supplementation, = 0 otherwise)
+rm( list=ls() )
+
+### create time-varying phospfate supplementation indicator
+library(tidyverse)
+p_time_varying %>% 
+	arrange(ID, tstart)
+p_time_varying =  p_time_varying %>% 
+	group_by(ID) %>% 
+	mutate(csum = cumsum(p_supplement)) %>%
+	mutate(td.p_supplement = ifelse(csum >= 1, 1, 0))
+p_time_varying = p_time_varying %>%
+select(ID, tstart, tstop, p_supplement, td.p_supplement, everything())
+View(p_time_varying)
+
+### fit Cox PH regression model with time-varying s-P and phosphate supplement
+library(survival)
+library(splines)
+CoxStandardFit <- coxph(Surv(tstart, tstop, status) ~ p + td.p_supplement +
+				age + as.factor(sex) + ns(apache_ii,3) + as.factor(ckd_hd), 
+                data = p_time_varying, cluster = ID)
+summary(CoxStandardFit)
+hr <- round(exp(coef(CoxStandardFit)), 2)
+ci <- round(exp(confint(CoxStandardFit)), 2)
+print(data.frame(hr,ci))
+
+CoxStandardFit <- coxph(Surv(tstart, tstop, status) ~ p + td.p_supplement +
+		age + as.factor(sex) + apache_ii + I(apache_ii^2) + I(apache_ii^3) + as.factor(ckd_hd), 
+                data = p_time_varying, cluster = ID)
+summary(CoxStandardFit)
+hr <- round(exp(coef(CoxStandardFit)), 2)
+ci <- round(exp(confint(CoxStandardFit)), 2)
+print(data.frame(hr,ci))
