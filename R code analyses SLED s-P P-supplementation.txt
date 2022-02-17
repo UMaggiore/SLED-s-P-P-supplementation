@@ -56,9 +56,12 @@ m.tab <- rename(m.tab, est =  "Predicted means",
 			lb = "LL of 95% CI", 
 			ub = "UL of 95% CI")
 
+# change cotrasts SLETD t 3vs 1, express Age per 10 yrs increas and Qg, Qdmlmin per 100ml/min increase
+contrasts(sled_3_sessions$SLED_ID) <- contr.treatment(levels(sled_3_sessions$SLED_ID), base = 2)
+
 # drow the plot of marginal means
 library(ggplot2)
-p <- ggplot(m.tab, aes(x = SLED_ID, y = est )) + 
+p.A <- ggplot(m.tab, aes(x = SLED_ID, y = est )) + 
 	geom_col(fill = "#FFDDDD", colour = "black", position = "dodge", width = 0.5, size = 0.20) +
   	geom_errorbar(aes(ymin = lb, ymax = ub), width = 0.1, size = 0.20) + 
 	labs(title = NULL, x = "SLED Session", y = "Serum Phosphate (mg/dL)") +
@@ -68,21 +71,13 @@ p <- ggplot(m.tab, aes(x = SLED_ID, y = est )) +
     	 aes(y = 0.4, label = format(round(est, 2), nsmall = 2)),
        colour = "black", size = 3,
        vjust = 1.5) + 
-	annotate(geom= "label", x = 3.3, y = 5.3, label = "A", size = 5) +
 	scale_y_continuous(breaks = seq(0, 5, by = 1.0)) +
       annotate("text", x = 1.5, y = 5.25, label = paste("2 vs 1\n P < 0.001") , size = 3) +
       annotate("text", x = 2.5, y = 5.25, label = paste("3 vs 2\n P = 0.017") , size = 3) 
-p
-ggsave("FIGURE2A.pdf", width = 5.56, height = 4.54)
-
-
-
-# change cotrasts SLETD t 3vs 1, express Age per 10 yrs increas and Qg, Qdmlmin per 100ml/min increase
-contrasts(sled_3_sessions$SLED_ID) <- contr.treatment(levels(sled_3_sessions$SLED_ID), base = 2)
+p.A
 
 
 ### calculation trend in matched proportion of post-SLED hypophoshatemia
-rm( list=ls() )
 library(survival)
 test.trend <- clogit( ipoP ~ SLED_ID + strata(ID), data = sled_3_sessions)
 summary(test.trend)
@@ -98,7 +93,7 @@ prop.hypoP <-
     	summarize(Mean = mean(ipoP, na.rm=TRUE) * 100)
 prop.hypoP$SLED_ID <- as.factor(prop.hypoP$SLED_ID)
 
-p <- ggplot(prop.hypoP, aes(x = SLED_ID, y = Mean )) + 
+p.B <- ggplot(prop.hypoP, aes(x = SLED_ID, y = Mean )) + 
 	geom_col(fill = "#FFDDDD", colour = "black", position = "dodge", width = 0.5, size = 0.20)  +
      labs(title = NULL, x = "SLED Session", y = "Post-SLED Hypophosphatemia (%)") +
      theme_bw() +
@@ -108,10 +103,11 @@ p <- ggplot(prop.hypoP, aes(x = SLED_ID, y = Mean )) +
      	colour = "black", size = 3,
      	vjust = 1.5) +
      annotate("text", x = 1.2, y = 35, label = paste("Test for trend: P = ", 
-	format(round(pval, 3), nsmall = 3)) , size = 3) +
-	annotate(geom= "label", x = 3.3, y = 35, label = "B", size = 5)
-p
-ggsave("FIGURE2B.pdf", width = 5.56, height = 4.54)
+	format(round(pval, 3), nsmall = 3)) , size = 3) 
+p.B
+library(ggpubr)
+ggarrange(p.A, p.B, labels = c("A", "B"), ncol = 1, nrow =2)
+ggsave("FIGURE2COMBINED.pdf")
 
 
 
